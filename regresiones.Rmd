@@ -1,0 +1,141 @@
+---
+title: "Proyecto"
+author: "Dore"
+date: "2024-06-29"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(caret)
+library(lubridate)
+library(PerformanceAnalytics)
+library(gridExtra)
+library(glmnet)
+library(MASS)
+```
+
+
+```{r}
+# Cargar los datasets
+train <- read.csv("train.csv")
+test <- read.csv("data.csv")
+```
+
+
+```{r}
+
+head(train)
+
+```
+```{r}
+
+yname = "median_house_value"
+continuas1 = c(yname, "longitude", "latitude", "housing_median_age", "total_rooms", "total_bedrooms", "population", "households", "median_income")
+
+categoricas = c("ocean_proximityINLAND", "ocean_proximity.1H.OCEAN", "ocean_proximityINLAND", "ocean_proximityISLAND", "ocean_proximityNEAR.BAY", "ocean_proximityNEAR.OCEAN")
+
+unique(test$ocean_proximity)
+
+```
+
+
+```{r}
+#crar variables dummy
+dummies <- dummyVars(" ~ ocean_proximity", data = train)
+housing_data_transformed <- data.frame(predict(dummies, newdata = train))
+
+# Combinar las variables dummy con el resto del dataset
+train_t <- cbind(train[ , !names(train) %in% c("ocean_proximity")], housing_data_transformed)
+
+train_t$id = NULL
+
+head(train_t)
+```
+
+```{r}
+suppressWarnings(chart.Correlation(train_t[continuas1], histogram=TRUE))
+```
+
+
+```{r}
+# Correlación entre las variables numéricas
+ggcorr(train_t[continuas1], label = TRUE)
+```
+El median income puede ser una variable importante a utilizar. longitude y population no se ven que tenga buena correlación, posiblemente se pueda eliminar esas variables.
+
+
+```{r}
+# Correlación entre las variables numéricas
+ggcorr(train_t[c(yname, categoricas)], label = TRUE)
+```
+Las variables dummy tienen bastante correlacion con la Y, aunque a INLAND y OCEAN tienen correlación de 1.
+
+# Modelos
+
+```{r}
+driver = trainControl( method = "repeatedcv", number=10, repeats=5)
+```
+
+
+```{r}
+na_counts = colSums(is.na(train_t))
+
+na_counts
+```
+```{r}
+# 2 aproaches
+
+#1 median en los valores
+train_t1 = train_t
+train_t1$total_bedrooms[is.na(train_t1$total_bedrooms)] = median(train_t1$total_bedrooms, na.rm = TRUE)
+test_1 = test
+test_1$total_bedrooms[is.na(test_1$total_bedrooms)] = median(test_1$total_bedrooms, na.rm = TRUE)
+
+
+#2 eliminar los datos
+train_t2 = train_t[!is.na(train_t$total_bedrooms), ]
+test_2 = test[!is.na(test$total_bedrooms), ]
+```
+
+
+
+
+```{r}
+lmm = train(median_house_value ~ ., data = train_t1, method = "lm", trControl = driver)
+```
+
+```{r}
+summary(lmm)
+```
+
+```{r}
+lmm2 = train(median_house_value ~ ., data = train_t2, method = "lm", trControl = driver)
+```
+
+```{r}
+summary(lmm2)
+```
+
+```{r}
+print(lmm2)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
