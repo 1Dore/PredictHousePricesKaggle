@@ -1,0 +1,94 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+# Instalar y cargar las librerías necesarias
+install.packages(c("randomForest", "xgboost", "GGally"))
+```
+
+```{r}
+library(tidyverse)
+library(caret)
+library(randomForest)
+library(xgboost)
+library(GGally)
+```
+
+```{r}
+# Cargar los datasets
+train <- read.csv("train.csv")
+test <- read.csv("test.csv")
+```
+
+```{r}
+# Ver las primeras filas del conjunto de entrenamiento
+head(train)
+
+# Resumen de los datos
+summary(train)
+
+# Distribución de la variable objetivo
+ggplot(train, aes(x = median_house_value)) +
+  geom_histogram(binwidth = 50000, fill = "blue", color = "black") +
+  theme_minimal() +
+  labs(title = "Distribución de median_house_value")
+
+# Correlación entre las variables numéricas
+num_vars <- train %>% select(-id, -ocean_proximity)
+ggcorr(num_vars, label = TRUE)
+
+# Relación entre median_income y median_house_value
+ggplot(train, aes(x = median_income, y = median_house_value)) +
+  geom_point(alpha = 0.3) +
+  theme_minimal() +
+  labs(title = "Relación entre median_income y median_house_value")
+```
+
+```{r}
+# Imputar valores nulos en total_bedrooms
+train$total_bedrooms[is.na(train$total_bedrooms)] <- median(train$total_bedrooms, na.rm = TRUE)
+test$total_bedrooms[is.na(test$total_bedrooms)] <- median(test$total_bedrooms, na.rm = TRUE)
+
+# Codificar variables categóricas
+train$ocean_proximity <- as.factor(train$ocean_proximity)
+test$ocean_proximity <- as.factor(test$ocean_proximity)
+
+# Escalar características numéricas
+num_features <- names(train)[sapply(train, is.numeric) & names(train) != "median_house_value"]
+preProcValues <- preProcess(train[, num_features], method = c("center", "scale"))
+train[, num_features] <- predict(preProcValues, train[, num_features])
+test[, num_features] <- predict(preProcValues, test[, num_features])
+```
+
+```{r}
+set.seed(123)
+train_control <- trainControl(method = "cv", number = 5)
+
+# Modelo Random Forest
+rf_model <- train(median_house_value ~ ., data = train, method = "rf", trControl = train_control)
+print(rf_model)
+
+# Modelo XGBoost
+xgb_grid <- expand.grid(
+  nrounds = 100,
+  max_depth = 6,
+  eta = 0.3,
+  gamma = 0,
+  colsample_bytree = 1,
+  min_child_weight = 1,
+  subsample = 1
+)
+xgb_model <- train(median_house_value ~ ., data = train, method = "xgbTree", trControl = train_control, tuneGrid = xgb_grid)
+print(xgb_model)
+
+# Comparar RMSE de los modelos
+results <- resamples(list(rf = rf_model, xgb = xgb_model))
+summary(results)
+```
+
+
+
+
+
