@@ -9,6 +9,9 @@ library(caret)
 library(randomForest)
 library(xgboost)
 library(GGally)
+library(leaflet)
+library(cluster)
+library(factoextra)
 ```
 
 ```{r}
@@ -39,6 +42,29 @@ ggplot(train, aes(x = median_income, y = median_house_value)) +
   geom_point(alpha = 0.3) +
   theme_minimal() +
   labs(title = "Relación entre median_income y median_house_value")
+
+ggplot(train, aes(x = longitude, y = latitude, color = median_house_value)) +
+  geom_point() +
+  scale_color_gradient(low = "blue", high = "red") +
+  labs(title = "Mapa de precios de casas por coordenadas",
+       x = "Longitud",
+       y = "Latitud",
+       color = "Precio de la Casa")
+
+ggplot(train, aes(x = longitude, y = latitude, color = ocean_proximity)) +
+  geom_point()  +
+  labs(title = "Mapa de precios de casas por coordenadas",
+       x = "Longitud",
+       y = "Latitud",
+       color = "Cercania")
+
+m <- leaflet(train) %>%
+  addTiles() %>%
+  addCircleMarkers(~longitude, ~latitude, radius = ~median_house_value/100000, 
+                   color = ~ifelse(median_house_value > median(train$median_house_value), 'red', 'blue'), 
+                   popup = ~paste("median_house_value:", median_house_value))
+
+m
 ```
 
 ```{r}
@@ -47,33 +73,103 @@ train$total_bedrooms[is.na(train$total_bedrooms)] <- median(train$total_bedrooms
 test$total_bedrooms[is.na(test$total_bedrooms)] <- median(test$total_bedrooms, na.rm = TRUE)
 
 # Codificar variables categóricas
-train$ocean_proximity <- as.factor(train$ocean_proximity)
-test$ocean_proximity <- as.factor(test$ocean_proximity)
+train$ocean_proximity_num <- as.numeric(as.factor(train$ocean_proximity))
+test$ocean_proximity_num <- as.numeric(as.factor(test$ocean_proximity))
 
 # Escalar características numéricas
 num_features <- names(train)[sapply(train, is.numeric) & names(train) != "median_house_value"]
 preProcValues <- preProcess(train[, num_features], method = c("center", "scale"))
 train[, num_features] <- predict(preProcValues, train[, num_features])
+
+num_features <- names(test)[sapply(test, is.numeric) & names(test) != "id"]
+preProcValues <- preProcess(test[, num_features], method = c("center", "scale"))
 test[, num_features] <- predict(preProcValues, test[, num_features])
 ```
+
+```{r}
+train
+```
+
+
+```{r}
+train[(train$ocean_proximity) = "ISLAND"]
+```
+
+
+```{r}
+calcular_silueta_promedio <- function(data, k) {
+  set.seed(42)
+  kmeans_result <- kmeans(data, centers = k)
+  silueta <- silhouette(kmeans_result$cluster, dist(data))
+  mean(silueta[, 3])  # Promedio del coeficiente de silueta
+}
+
+
+# Calcular la silueta promedio para k = 2 a 10
+k_values <- 2:15
+
+fviz_nbclust(train[, c("longitude", "latitude", "ocean_proximity_num")], kmeans, method = "wss")
+
+silueta_promedio <- sapply(k_values, function(k) calcular_silueta_promedio(train[, c("longitude", "latitude", "ocean_proximity_num")], k))
+
+
+# Visualizar los resultados
+plot(k_values, silueta_promedio, type = "b", pch = 19,
+     xlab = "Número de Clusters (k)", ylab = "Coeficiente de Silueta Promedio",
+     main = "Coeficiente de Silueta Promedio para Diferentes k")
+
+
+
+
+```
+
+```{r}
+k_optimo <- k_values[which.max(silueta_promedio)]
+print(paste("El número óptimo de clusters es:", k_optimo))
+```
+
+```{r}
+
+train$ocean_proximity_num <- as.numeric(as.factor(train$ocean_proximity))
+test$ocean_proximity_num <- as.numeric(as.factor(test$ocean_proximity))
+
+# Establece el número de clusters
+num_clusters <- 5
+
+# Aplica el clustering K-Means
+set.seed(42) # Para reproducibilidad
+clusters <- kmeans(train[, c("longitude", "latitude", "ocean_proximity_num")], centers = num_clusters)
+
+# Añade los clusters al dataframe
+train$position_cluster <- as.factor(clusters$cluster)
+
+# Visualiza los clusters
+ggplot(train, aes(x = longitude, y = latitude, color = position_cluster)) +
+  geom_point() +
+  labs(title = "Clustering de casas por coordenadas",
+       x = "Longitud",
+       y = "Latitud",
+       color = "Cluster")
+```
+
+```{r}
+train
+```
+
 
 ```{r}
 set.seed(123)
 fitControl <- trainControl(method = "cv",
                            number = 5)
 
-
 # Implement KNN (k = 3)
 
 k <- 10
 
-knnGrid <-  expand.grid(k = c(1:15))
-
-knn_predictions <- train(median_house_value ~ ., # formula
+knn_predictions <- train(median_house_value ~ ., 
                  data = train, # train data   
                  method = "knn",
-                 trControl = fitControl, 
-                 preProcess = c("center", "scale")
+                 trControl = fitControl
                  )
 
 # Comparar RMSE de los modelos
@@ -86,9 +182,7 @@ knn_predictions
 
 lista <- data.frame(ID = test$id,
                     median_house_value = predict(knn_predictions, test) )
-lista
-
-#write.table(lista, "respuesta.csv", sep = ",", row.names = FALSE)
+write.table(lista, "respuesta.csv", sep = ",", row.names = FALSE)
 ```
 
 
