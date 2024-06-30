@@ -20,8 +20,8 @@ library(PerformanceAnalytics)
 
 ```{r}
 # Cargar los datasets
-train <- read.csv("train.csv")
-test <- read.csv("test.csv")
+train <- read.csv("../train.csv")
+test <- read.csv("../test.csv")
 ```
 
 ```{r}
@@ -46,6 +46,30 @@ ggplot(train, aes(x = median_income, y = median_house_value)) +
   geom_point(alpha = 0.3) +
   theme_minimal() +
   labs(title = "Relación entre median_income y median_house_value")
+
+ggplot(train, aes(x = longitude, y = latitude, color = ocean_proximity)) +
+  geom_point()  +
+  labs(title = "Mapa de precios de casas por coordenadas",
+       x = "Longitud",
+       y = "Latitud",
+       color = "Cercania")
+
+ggplot(train, aes(x = longitude, y = latitude, color = median_house_value)) +
+  geom_point() +
+  scale_color_gradient(low = "blue", high = "red") +
+  labs(title = "Mapa de precios de casas por coordenadas",
+       x = "Longitud",
+       y = "Latitud",
+       color = "Precio de la Casa")
+
+
+m <- leaflet(train) %>%
+  addTiles() %>%
+  addCircleMarkers(~longitude, ~latitude, radius = ~median_house_value/100000, 
+                   color = ~ifelse(median_house_value > median(train$median_house_value), 'red', 'blue'), 
+                   popup = ~paste("median_house_value:", median_house_value))
+
+m
 ```
 
 ```{r}
@@ -89,7 +113,7 @@ test_processed[, num_features] <- predict(preProcValues, test[, num_features])
 
 ```{r}
 
-continuas =  names(train)[sapply(train, is.numeric) & names(train) != "median_house_value" & names(train) != "id"]
+continuas =  names(train)[sapply(train, is.numeric) & names(train) != "median_house_value" & names(train) != "id"  &   30 < sapply(train, n_distinct)  ]
 continuas
 ```
 
@@ -138,13 +162,8 @@ remove_outliers <- function(df, columns) {
 numeric_columns_train <- sapply(train_processed, is.numeric)
 train_processed_no_outliers <- remove_outliers(train_processed, names(numeric_columns_train[numeric_columns_train]))
 
-numeric_columns_test <- sapply(test_processed, is.numeric)
-test_processed_no_outliers <- remove_outliers(test_processed, names(numeric_columns_test[numeric_columns_test]))
-
 cat("Tamaño del dataset train_processed original: ", nrow(train_processed), "\n")
 cat("Tamaño del dataset train_processed sin outliers: ", nrow(train_processed_no_outliers), "\n")
-cat("Tamaño del dataset test_processed original: ", nrow(test_processed), "\n")
-cat("Tamaño del dataset test_processed sin outliers: ", nrow(test_processed_no_outliers), "\n")
 ```
 
 ```{r}
@@ -173,6 +192,9 @@ for (column_name  in  continuas) {
 }
 
 chart.Correlation(train_processed_no_outliers[continuas], histogram=TRUE)
+```
+```{r}
+head(train_processed_no_outliers)
 ```
 
 
