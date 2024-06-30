@@ -126,16 +126,108 @@ summary(lmm2)
 print(lmm2)
 ```
 
+```{r}
+model_ridge = train(
+  median_house_value ~ ., 
+  data = train_t2, 
+  method = "glmnet", 
+  tuneGrid = expand.grid(alpha = 0, lambda = seq(0.001, 0.90, by = 0.001)),
+  trControl = driver
+)
+
+print(model_ridge)
+```
+
+```{r}
+plot(model_ridge)
+```
+```{r}
+model_ridge$bestTune
+```
+
+
+
+```{r}
+model_ridge$results[200,]
+```
+
+```{r}
+model_lasso = train(
+  median_house_value ~ ., 
+  data = train_t2, 
+  method = "glmnet", 
+  tuneGrid = expand.grid(alpha = 1, lambda = seq(0.001, 0.90, by = 0.001)),
+  trControl = driver
+)
+
+print(model_ridge)
+```
+
+
+```{r}
+model_lasso$bestTune
+```
+
+```{r}
+model_lasso$results[900, ]
+```
+
+```{r}
+elastic = train(
+  median_house_value ~ ., 
+  data = train_t2, 
+  method = "glmnet", 
+  tuneGrid = expand.grid(alpha = seq(0.001, 1, by = 0.001), lambda = seq(0.001, 0.90, by = 0.001)),
+  trControl = driver
+)
+
+print(elastic)
+```
 
 
 
 
+```{r}
+train_t3 = train_t2
+
+train_t3$ocean_proximity.1H.OCEAN = NULL
+```
 
 
+```{r}
+# Función para crear un boxplot para una columna específica
+create_boxplot <- function(column_name) {
+  ggplot(train_t3, aes_string(x = "1", y = column_name)) +  # Usamos aes_string para la evaluación no estándar
+    geom_boxplot() +
+    labs(title = paste("Boxplot of", column_name), x = "", y = column_name) +
+    theme_minimal()
+}
+
+# Generar y mostrar todos los boxplots
+plots <- lapply(continuas1, create_boxplot)
+
+# Si quieres ver los plots individualmente en la consola, puedes hacerlo así:
+for (plot in plots) {
+  print(plot)
+}
+```
+
+```{r}
+outliers = c("total_rooms", "total_bedrooms", "population", "households", "median_income")
 
 
+# Normalización Min-Max usando caret
+preProcValues_min_max <- preProcess(train_t3[, otuliers], method = c("range"))
+train_t3_normalized <- predict(preProcValues_min_max, train_t3)
 
+# Estandarización usando caret
+preProcValues_standard <- preProcess(train_t3[, otuliers], method = c("center", "scale"))
+train_t3_standardized <- predict(preProcValues_standard, train_t3)
 
+# Ver los primeros registros para verificar la normalización y estandarización
+head(train_t3_normalized)
+head(train_t3_standardized)
+```
 
 
 
