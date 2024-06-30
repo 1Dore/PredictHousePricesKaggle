@@ -177,14 +177,20 @@ elastic = train(
   median_house_value ~ ., 
   data = train_t2, 
   method = "glmnet", 
-  tuneGrid = expand.grid(alpha = seq(0.001, 1, by = 0.001), lambda = seq(0.001, 0.90, by = 0.001)),
+  tuneGrid = expand.grid(alpha = seq(0.001, 1, by = 0.005), lambda = seq(0.001, 0.90, by = 0.005)),
   trControl = driver
 )
 
 print(elastic)
 ```
 
+```{r}
+elastic$bestTune
+```
 
+```{r}
+elastic$results[7740, ]
+```
 
 
 ```{r}
@@ -217,11 +223,11 @@ outliers = c("total_rooms", "total_bedrooms", "population", "households", "media
 
 
 # Normalización Min-Max usando caret
-preProcValues_min_max <- preProcess(train_t3[, otuliers], method = c("range"))
+preProcValues_min_max <- preProcess(train_t3[, outliers], method = c("range"))
 train_t3_normalized <- predict(preProcValues_min_max, train_t3)
 
 # Estandarización usando caret
-preProcValues_standard <- preProcess(train_t3[, otuliers], method = c("center", "scale"))
+preProcValues_standard <- preProcess(train_t3[, outliers], method = c("center", "scale"))
 train_t3_standardized <- predict(preProcValues_standard, train_t3)
 
 # Ver los primeros registros para verificar la normalización y estandarización
