@@ -56,18 +56,45 @@ train$ocean_proximity <- as.factor(train$ocean_proximity)
 test$ocean_proximity <- as.factor(test$ocean_proximity)
 
 # Escalar características numéricas
-num_features <- names(train)[sapply(train, is.numeric) & names(train) != "median_house_value"]
+num_features <- names(train)[sapply(train, is.numeric) & names(train) != "median_house_value" & names(train) != "id"]
 preProcValues <- preProcess(train[, num_features], method = c("center", "scale"))
-train[, num_features] <- predict(preProcValues, train[, num_features])
-test[, num_features] <- predict(preProcValues, test[, num_features])
+train_processed <- train
+train_processed[, num_features] <- predict(preProcValues, train[, num_features])
+test_processed <- test
+test_processed[, num_features] <- predict(preProcValues, test[, num_features])
+
+# Guardar los nuevos datasets procesados
+# write.csv(train_processed, "train_processed.csv", row.names = FALSE)
+# write.csv(test_processed, "test_processed.csv", row.names = FALSE)
 ```
 
 ```{r}
+# Utilizar Recursive Feature Elimination (RFE) para seleccionar las 5 mejores variables
+set.seed(123)
+control <- rfeControl(functions = rfFuncs, method = "cv", number = 5)
+rfe_results <- rfe(train_processed[, num_features], train_processed$median_house_value, sizes = 5, rfeControl = control)
+
+# Resumen de las variables seleccionadas
+print(rfe_results)
+
+# Variables seleccionadas
+selected_features <- predictors(rfe_results)
+print(selected_features)
+
+# Guardar los datos seleccionados
+# train_selected <- train_processed[, c(selected_features, "median_house_value")]
+# write.csv(train_selected, "train_selected.csv", row.names = FALSE)
+```
+
+```{r}
+# Seleccionar solo las características seleccionadas para el entrenamiento
+train_selected <- train_processed[, c(selected_features, "median_house_value")]
+
 set.seed(123)
 train_control <- trainControl(method = "cv", number = 5)
 
 # Modelo Random Forest
-rf_model <- train(median_house_value ~ ., data = train, method = "rf", trControl = train_control)
+rf_model <- train(median_house_value ~ ., data = train_selected, method = "rf", trControl = train_control)
 print(rf_model)
 
 # Modelo XGBoost
@@ -80,7 +107,7 @@ xgb_grid <- expand.grid(
   min_child_weight = 1,
   subsample = 1
 )
-xgb_model <- train(median_house_value ~ ., data = train, method = "xgbTree", trControl = train_control, tuneGrid = xgb_grid)
+xgb_model <- train(median_house_value ~ ., data = train_selected, method = "xgbTree", trControl = train_control, tuneGrid = xgb_grid)
 print(xgb_model)
 
 # Comparar RMSE de los modelos
@@ -88,7 +115,37 @@ results <- resamples(list(rf = rf_model, xgb = xgb_model))
 summary(results)
 ```
 
+```{r}
+# Seleccionar el mejor modelo basado en el RMSE
+best_model <- if(min(rf_model$results$RMSE) < min(xgb_model$results$RMSE)) {
+  rf_model
+} else {
+  xgb_model
+}
 
+# Asegurarse de que las variables seleccionadas estén presentes en el conjunto de prueba
+# y eliminar la variable median_house_value
+selected_features <- setdiff(selected_features, "median_house_value")
+test_selected <- test_processed[, selected_features]
+
+# Asegurarse de que test_selected no contenga factores que no estén en el train
+for (col in selected_features) {
+  if (is.factor(test_selected[[col]])) {
+    test_selected[[col]] <- factor(test_selected[[col]], levels = levels(train_selected[[col]]))
+  }
+}
+
+# Predicción en el conjunto de prueba
+test_predictions <- predict(best_model, newdata = test_selected)
+
+# Generar el archivo de salida
+submission <- data.frame(id = test_processed$id, median_house_value = test_predictions)
+write.csv(submission, "submission.csv", row.names = FALSE)
+```
+
+```{r}
+test_predictions
+```
 
 
 

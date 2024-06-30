@@ -1,0 +1,226 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+# Instalar y cargar las librerías necesarias
+install.packages(c("randomForest", "xgboost", "GGally"))
+```
+
+```{r}
+library(tidyverse)
+library(caret)
+library(randomForest)
+library(xgboost)
+library(GGally)
+```
+
+```{r}
+# Cargar los datasets
+train <- read.csv("train.csv")
+test <- read.csv("test.csv")
+```
+
+```{r}
+# Ver las primeras filas del conjunto de entrenamiento
+head(train)
+
+# Resumen de los datos
+summary(train)
+
+# Distribución de la variable objetivo
+ggplot(train, aes(x = median_house_value)) +
+  geom_histogram(binwidth = 50000, fill = "blue", color = "black") +
+  theme_minimal() +
+  labs(title = "Distribución de median_house_value")
+
+# Correlación entre las variables numéricas
+num_vars <- train %>% select(-id, -ocean_proximity)
+ggcorr(num_vars, label = TRUE)
+
+# Relación entre median_income y median_house_value
+ggplot(train, aes(x = median_income, y = median_house_value)) +
+  geom_point(alpha = 0.3) +
+  theme_minimal() +
+  labs(title = "Relación entre median_income y median_house_value")
+```
+
+```{r}
+# Imputar valores nulos en total_bedrooms
+train$total_bedrooms[is.na(train$total_bedrooms)] <- median(train$total_bedrooms, na.rm = TRUE)
+test$total_bedrooms[is.na(test$total_bedrooms)] <- median(test$total_bedrooms, na.rm = TRUE)
+
+# Codificar variables categóricas
+train$ocean_proximity <- as.factor(train$ocean_proximity)
+test$ocean_proximity <- as.factor(test$ocean_proximity)
+
+# Escalar características numéricas
+num_features <- names(train)[sapply(train, is.numeric) & names(train) != "median_house_value" & names(train) != "id"]
+preProcValues <- preProcess(train[, num_features], method = c("center", "scale"))
+train_processed <- train
+train_processed[, num_features] <- predict(preProcValues, train[, num_features])
+test_processed <- test
+test_processed[, num_features] <- predict(preProcValues, test[, num_features])
+
+# Guardar los nuevos datasets procesados
+# write.csv(train_processed, "train_processed.csv", row.names = FALSE)
+# write.csv(test_processed, "test_processed.csv", row.names = FALSE)
+```
+
+```{r}
+# Utilizar Recursive Feature Elimination (RFE) para seleccionar las 5 mejores variables
+set.seed(123)
+control <- rfeControl(functions = rfFuncs, method = "cv", number = 5)
+rfe_results <- rfe(train_processed[, num_features], train_processed$median_house_value, sizes = 5, rfeControl = control)
+
+# Resumen de las variables seleccionadas
+print(rfe_results)
+
+# Variables seleccionadas
+selected_features <- predictors(rfe_results)
+print(selected_features)
+
+# Guardar los datos seleccionados
+# train_selected <- train_processed[, c(selected_features, "median_house_value")]
+# write.csv(train_selected, "train_selected.csv", row.names = FALSE)
+```
+
+```{r}
+# Seleccionar solo las características seleccionadas para el entrenamiento
+train_selected <- train_processed[, c(selected_features, "median_house_value")]
+
+set.seed(123)
+train_control <- trainControl(method = "cv", number = 5)
+
+# Modelo Random Forest
+rf_model <- train(median_house_value ~ ., data = train_selected, method = "rf", trControl = train_control)
+print(rf_model)
+
+# Modelo XGBoost
+xgb_grid <- expand.grid(
+  nrounds = 100,
+  max_depth = 6,
+  eta = 0.3,
+  gamma = 0,
+  colsample_bytree = 1,
+  min_child_weight = 1,
+  subsample = 1
+)
+xgb_model <- train(median_house_value ~ ., data = train_selected, method = "xgbTree", trControl = train_control, tuneGrid = xgb_grid)
+print(xgb_model)
+
+# Comparar RMSE de los modelos
+results <- resamples(list(rf = rf_model, xgb = xgb_model))
+summary(results)
+```
+
+```{r}
+# Ridge Regression
+set.seed(123)
+ridge_model <- train(median_house_value ~ ., data = train_selected, method = "ridge", trControl = train_control, 
+                     tuneLength = 10)
+print(ridge_model)
+
+# Lasso Regression
+set.seed(123)
+lasso_model <- train(median_house_value ~ ., data = train_selected, method = "lasso", trControl = train_control, 
+                     tuneLength = 10)
+print(lasso_model)
+
+# Comparar RMSE de los modelos, incluyendo Ridge y Lasso
+results <- resamples(list(rf = rf_model, xgb = xgb_model, ridge = ridge_model, lasso = lasso_model))
+summary(results)
+```
+
+```{r warning=FALSE}
+# Hyperparameter tuning for XGBoost with more extensive grid search
+xgb_grid_2 <- expand.grid(
+  nrounds = c(100, 200),
+  max_depth = c(6, 10),
+  eta = c(0.01, 0.1, 0.3),
+  gamma = c(0, 0.1, 0.2),
+  colsample_bytree = c(0.8, 1),
+  min_child_weight = c(1, 3),
+  subsample = c(0.8, 1)
+)
+
+# Custom train function for xgbTree to avoid the warning
+xgb_custom <- trainControl(method = "cv", number = 5)
+
+# Define the train function with additional control to avoid the warning
+xgb_model_2 <- train(median_house_value ~ ., data = train_selected, method = "xgbTree",
+                     trControl = xgb_custom, tuneGrid = xgb_grid_2,
+                     verbose = FALSE, nthread = 1)
+
+print(xgb_model_2)
+```
+
+```{r}
+# Ensemble model with stacking
+set.seed(123)
+
+# Crear lista de modelos usando caretList
+model_list <- caretList(
+  median_house_value ~ ., data = train_selected,
+  trControl = train_control,
+  methodList = c("rf", "xgbTree", "ridge", "lasso"),
+  tuneList = list(
+    xgbTree = caretModelSpec(method = "xgbTree", tuneGrid = xgb_grid_2)
+  )
+)
+
+# Stacking con caretStack
+stack_control <- trainControl(method = "cv", number = 5, savePredictions = "final", classProbs = TRUE)
+stack_model <- caretStack(model_list, method = "glm", metric = "RMSE", trControl = stack_control)
+
+print(stack_model)
+```
+
+```{r}
+# Seleccionar el mejor modelo basado en el RMSE incluyendo ensemble
+best_model <- if(min(rf_model$results$RMSE) < min(xgb_model_2$results$RMSE) & 
+                  min(rf_model$results$RMSE) < min(ridge_model$results$RMSE) & 
+                  min(rf_model$results$RMSE) < min(lasso_model$results$RMSE) & 
+                  min(rf_model$results$RMSE) < min(stack_model$results$RMSE)) {
+  rf_model
+} else if (min(xgb_model_2$results$RMSE) < min(ridge_model$results$RMSE) & 
+           min(xgb_model_2$results$RMSE) < min(lasso_model$results$RMSE) & 
+           min(xgb_model_2$results$RMSE) < min(stack_model$results$RMSE)) {
+  xgb_model_2
+} else if (min(ridge_model$results$RMSE) < min(lasso_model$results$RMSE) & 
+           min(ridge_model$results$RMSE) < min(stack_model$results$RMSE)) {
+  ridge_model
+} else if (min(lasso_model$results$RMSE) < min(stack_model$results$RMSE)) {
+  lasso_model
+} else {
+  stack_model
+}
+
+# Asegurarse de que las variables seleccionadas estén presentes en el conjunto de prueba
+# y eliminar la variable median_house_value
+selected_features <- setdiff(selected_features, "median_house_value")
+test_selected <- test_processed[, selected_features]
+
+# Asegurarse de que test_selected no contenga factores que no estén en el train
+for (col in selected_features) {
+  if (is.factor(test_selected[[col]])) {
+    test_selected[[col]] <- factor(test_selected[[col]], levels = levels(train_selected[[col]]))
+  }
+}
+
+# Predicción en el conjunto de prueba
+test_predictions <- predict(best_model, newdata = test_selected)
+
+# Generar el archivo de salida
+submission <- data.frame(id = test_processed$id, median_house_value = test_predictions)
+write.csv(submission, "submission.csv", row.names = FALSE)
+```
+```{r}
+best_model
+```
+
+
+
+
+
