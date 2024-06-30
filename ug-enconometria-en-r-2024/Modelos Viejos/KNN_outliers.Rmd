@@ -12,6 +12,9 @@ library(GGally)
 library(leaflet)
 library(cluster)
 library(factoextra)
+library(glmnet)
+
+library(PerformanceAnalytics)
 ```
 
 ```{r}
@@ -68,6 +71,25 @@ m
 ```
 
 ```{r}
+continuas1 = c("longitude", "latitude", "housing_median_age", "total_rooms", "total_bedrooms", "population", "households", "median_income")
+
+create_boxplot <- function(column_name) {
+  ggplot(train, aes_string(x = "1", y = column_name)) +  # Usamos aes_string para la evaluación no estándar
+    geom_boxplot() +
+    labs(title = paste("Boxplot of", column_name), x = "", y = column_name) +
+    theme_minimal()
+}
+
+plots <- lapply(continuas1, create_boxplot)
+
+for (plot in plots) {
+  show(plot)
+}
+
+```
+
+
+```{r}
 # Imputar valores nulos en total_bedrooms
 train$total_bedrooms[is.na(train$total_bedrooms)] <- median(train$total_bedrooms, na.rm = TRUE)
 test$total_bedrooms[is.na(test$total_bedrooms)] <- median(test$total_bedrooms, na.rm = TRUE)
@@ -88,11 +110,6 @@ test[, num_features] <- predict(preProcValues, test[, num_features])
 
 ```{r}
 train
-```
-
-
-```{r}
-train[(train$ocean_proximity) = "ISLAND"]
 ```
 
 
@@ -128,10 +145,8 @@ k_optimo <- k_values[which.max(silueta_promedio)]
 print(paste("El número óptimo de clusters es:", k_optimo))
 ```
 
-```{r}
 
-train$ocean_proximity_num <- as.numeric(as.factor(train$ocean_proximity))
-test$ocean_proximity_num <- as.numeric(as.factor(test$ocean_proximity))
+```{r}
 
 # Establece el número de clusters
 num_clusters <- 5
@@ -153,9 +168,67 @@ ggplot(train, aes(x = longitude, y = latitude, color = position_cluster)) +
 ```
 
 ```{r}
-name(train)
+outliers = c("total_rooms", "total_bedrooms", "population", "households", "median_income")
+
+
+preProcValues_min_max <- preProcess(train[, outliers], method = c("range"))
+train_t3_normalized <- predict(preProcValues_min_max, train)
+
+preProcValues_standard <- preProcess(train[, outliers], method = c("center", "scale"))
+train_t3_standardized <- predict(preProcValues_standard, train)
+```
+
+```{r}
+continuas1 = c("longitude", "latitude", "housing_median_age", "total_rooms", "total_bedrooms", "population", "households", "median_income")
+
+create_boxplot <- function(column_name) {
+  ggplot(train, aes_string(x = "1", y = column_name)) +  # Usamos aes_string para la evaluación no estándar
+    geom_boxplot() +
+    labs(title = paste("Boxplot of", column_name), x = "", y = column_name) +
+    theme_minimal()
+}
+
+plots <- lapply(continuas1, create_boxplot)
+
+for (plot in plots) {
+  show(plot)
+}
+
+
+
 
 ```
+
+```{r}
+
+for (column_name  in  continuas1) {
+  
+  vector_numerico = unlist(train[column_name])
+  
+  Q1 <- quantile(vector_numerico, 0.25)  # Primer cuartil (Q1)
+  Q3 <- quantile(vector_numerico, 0.75)  # Tercer cuartil (Q3)
+  IQR <- Q3 - Q1  # Rango intercuartílico
+  
+  # Definir los límites inferior y superior para identificar outliers
+  limite_inferior <- Q1 - 1.5 * IQR
+  limite_superior <- Q3 + 1.5 * IQR
+  
+  # Identificar los outliers
+  outliers <- vector_numerico[vector_numerico < limite_inferior | vector_numerico > limite_superior]
+  
+  # Contar los outliers
+  conteo_outliers <- length(outliers)
+  
+  # Resultados
+  print(column_name)
+  print(paste("Número de outliers identificados usando IQR:", conteo_outliers))
+  print(paste("Prosnetaje de outliers identificados usando IQR:", conteo_outliers/nrow(train)))
+}
+
+chart.Correlation(train[continuas1], histogram=TRUE)
+
+```
+
 
 ```{r}
 
@@ -171,9 +244,14 @@ print(selected_features)
 
 ```
 ```{r}
-selected_features
+selected_features = c(c("position_cluster"), selected_features)
+
 ```
 
+```{r}
+selected_features
+
+```
 
 ```{r}
 
@@ -207,6 +285,7 @@ lista <- data.frame(ID = test$id,
                     median_house_value = predict(knn_predictions, test) )
 write.table(lista, "respuesta.csv", sep = ",", row.names = FALSE)
 ```
+
 
 
 

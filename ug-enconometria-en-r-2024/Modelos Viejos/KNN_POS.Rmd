@@ -153,56 +153,33 @@ ggplot(train, aes(x = longitude, y = latitude, color = position_cluster)) +
 ```
 
 ```{r}
-name(train)
-
+train
 ```
 
-```{r}
 
+```{r}
 set.seed(123)
-control <- rfeControl(functions = rfFuncs, method = "cv", number = 5)
-rfe_results <- rfe(train[, num_features], train$median_house_value, sizes = 5, rfeControl = control)
+fitControl <- trainControl(method = "cv",
+                           number = 5)
 
-print(rfe_results)
+# Implement KNN (k = 3)
 
-selected_features <- predictors(rfe_results)
-print(selected_features)
+k <- 10
 
+knn_predictions <- train(median_house_value ~ ., 
+                 data = train, # train data   
+                 method = "knn",
+                 trControl = fitControl
+                 )
 
-```
-```{r}
-selected_features
-```
+# Comparar RMSE de los modelos
 
-
-```{r}
-
-train_control <- trainControl(method = "cv", number = 5)
-
-train_selected <- train[, c(selected_features, "median_house_value")]
-
-rf_model <- train(median_house_value ~ ., data = train_selected, method = "rf", trControl = train_control)
-print(rf_model)
-
-
-xgb_grid <- expand.grid(
-  nrounds = 50,
-  max_depth = 6,
-  eta = 0.3,
-  gamma = 0,
-  colsample_bytree = 1,
-  min_child_weight = 1,
-  subsample = 1
-)
-
-xgb_model <- train(median_house_value ~ ., data = train_selected, method = "xgbTree", trControl = train_control, tuneGrid = xgb_grid)
-print(xgb_model)
-
-results <- resamples(list(rf = rf_model, xgb = xgb_model))
-summary(results)
+knn_predictions
 ```
 
 ```{r}
+
+
 lista <- data.frame(ID = test$id,
                     median_house_value = predict(knn_predictions, test) )
 write.table(lista, "respuesta.csv", sep = ",", row.names = FALSE)
