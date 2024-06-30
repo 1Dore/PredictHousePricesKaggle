@@ -19,8 +19,8 @@ library(PerformanceAnalytics)
 
 ```{r}
 # Cargar los datasets
-train <- read.csv("train.csv")
-test <- read.csv("test.csv")
+train <- read.csv("../train.csv")
+test <- read.csv("../test.csv")
 ```
 
 ```{r}
