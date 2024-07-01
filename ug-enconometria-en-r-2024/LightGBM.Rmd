@@ -1,0 +1,81 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+```{r}
+# Cargar librerías necesarias
+library(tidyverse)
+library(caret)
+library(lightgbm)
+library(GGally)
+library(caretEnsemble)
+
+# Cargar los datasets
+train <- read.csv("train.csv")
+test <- read.csv("test.csv")
+
+# Imputar valores nulos en total_bedrooms
+train$total_bedrooms[is.na(train$total_bedrooms)] <- median(train$total_bedrooms, na.rm = TRUE)
+test$total_bedrooms[is.na(test$total_bedrooms)] <- median(test$total_bedrooms, na.rm = TRUE)
+
+# Codificar variables categóricas
+train$ocean_proximity <- as.factor(train$ocean_proximity)
+test$ocean_proximity <- as.factor(test$ocean_proximity)
+
+# Ingeniería de características
+train <- train %>%
+  mutate(
+    rooms_per_household = total_rooms / households,
+    bedrooms_per_room = total_bedrooms / total_rooms,
+    population_per_household = population / households
+  )
+
+test <- test %>%
+  mutate(
+    rooms_per_household = total_rooms / households,
+    bedrooms_per_room = total_bedrooms / total_rooms,
+    population_per_household = population / households
+  )
+
+# Escalar características numéricas
+num_features <- names(train)[sapply(train, is.numeric) & names(train) != "median_house_value" & names(train) != "id"]
+preProcValues <- preProcess(train[, num_features], method = c("center", "scale"))
+train_processed <- train
+train_processed[, num_features] <- predict(preProcValues, train[, num_features])
+test_processed <- test
+test_processed[, num_features] <- predict(preProcValues, test[, num_features])
+
+# Seleccionar características
+selected_features <- c(num_features, "ocean_proximity")
+
+# Preparar los datos para LightGBM
+dtrain <- lgb.Dataset(data = as.matrix(train_processed[, selected_features]), label = train_processed$median_house_value)
+
+# Parámetros de LightGBM
+params <- list(
+  objective = "regression",
+  metric = "rmse",
+  boosting_type = "gbdt",
+  learning_rate = 0.01,
+  num_leaves = 31,
+  feature_fraction = 0.9,
+  bagging_fraction = 0.8,
+  bagging_freq = 5,
+  verbose = -1
+)
+
+# Entrenar el modelo
+set.seed(123)
+model_lgb <- lgb.train(params, dtrain, 1000, valids = list(train = dtrain), early_stopping_rounds = 100, verbose = -1)
+
+# Predicción en el conjunto de prueba
+test_selected <- as.matrix(test_processed[, selected_features])
+test_predictions <- predict(model_lgb, test_selected)
+
+# Generar el archivo de salida
+submission <- data.frame(id = test_processed$id, median_house_value = test_predictions)
+write.csv(submission, "submission.csv", row.names = FALSE)
+```
+
