@@ -147,5 +147,3 @@ write.csv(submission, "submission.csv", row.names = FALSE)
 test_predictions
 ```
 
-
-

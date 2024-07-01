@@ -1,0 +1,281 @@
+---
+title: "Proyecto Predict House Prices"
+author: "José Abril - Diego Alvarez - Oswaldo López"
+date: "2024-07-01"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# Presentación de proyecto de Predict House Prices en Kaggle
+
+En este proyecto se abordaron todos los temas vistos en clase para mejorar el RMSE a la hora de entrenar un modelo de predicción sobre la variable "median_house_value".
+
+
+
+```{r}
+suppressPackageStartupMessages({
+  library(tidyverse)
+  library(caret)
+  library(lightgbm)
+  library(GGally)
+  library(caretEnsemble)
+  library(dplyr)
+  library(ggplot2)
+  library(caret)
+  library(lubridate)
+  library(PerformanceAnalytics)
+  library(gridExtra)
+  library(glmnet)
+  library(MASS)
+  library(gridExtra)
+})
+
+```
+
+
+
+```{r}
+# Cargar los datasets
+train <- read.csv("../train.csv")
+test <- read.csv("../data.csv")
+```
+
+
+Veamos que tiene el dataset:
+
+
+```{r}
+head(train)
+```
+
+Vemos todas las variables posibles a utilizar y nuestra Y llamada "median_house_value". Con esto en mente vamos a visualizar nuestros datos y separarlos entre continuos y categóricos.
+
+
+```{r}
+yname = "median_house_value"
+continuas =  names(train)[sapply(train, is.numeric) & names(train) != "median_house_value" & names(train) != "id"  &   30 < sapply(train, n_distinct)  ]
+continuas
+```
+
+
+```{r fig.height=10, fig.width=9}
+suppressWarnings(chart.Correlation(train[c(yname,continuas)], histogram=TRUE))
+```
+
+Vimos cómo están distribuidos los valores y su correlación. Aislando solo la correlación se ve lo siguiente:
+
+
+```{r}
+# Correlación entre las variables numéricas
+ggcorr(train[continuas], label = TRUE)
+```
+
+Aqui observamos la alta correlación con median_inc, una variable importante. Y luego la correlación entre las otras variables.
+
+
+Ahora, con las categóricas:
+
+
+Codificamos las variables categóricas para ser analizadas.
+
+```{r}
+# Codificar variables categóricas
+train$ocean_proximity <- as.factor(train$ocean_proximity)
+test$ocean_proximity <- as.factor(test$ocean_proximity)
+
+unique(train$ocean_proximity)
+```
+Esto no es visualmente en el dataframe, pero si lo transforma a la hora de analizarlo correctamente.
+
+
+Ahora veamos los datos como tal:
+
+```{r fig.height=15, fig.width=9}
+# Función para crear un boxplot para una columna específica
+create_boxplot <- function(column_name) {
+  ggplot(train, aes_string(x = "1", y = column_name)) +  # Usamos aes_string para la evaluación no estándar
+    geom_boxplot() +
+    labs(title = paste("Boxplot of", column_name), x = "", y = column_name) +
+    theme_minimal()
+}
+
+# Generar y mostrar todos los boxplots
+plots <- lapply(c(continuas), create_boxplot)
+
+do.call(grid.arrange, c(plots, ncol = 2))
+```
+
+
+Con esto vemos que tenemos bastantes valores outliers.
+
+
+Veamos la cantidad de valores nulos:
+
+```{r}
+na_counts = colSums(is.na(train))
+
+na_counts
+
+```
+Se identificó la variable total_bedrooms con valores nulos. Procedemos a usar la mediana de esos valores.
+
+```{r}
+# Imputar valores nulos en total_bedrooms
+train$total_bedrooms[is.na(train$total_bedrooms)] <- median(train$total_bedrooms, na.rm = TRUE)
+test$total_bedrooms[is.na(test$total_bedrooms)] <- median(test$total_bedrooms, na.rm = TRUE)
+```
+
+
+```{r}
+na_counts = colSums(is.na(train))
+
+na_counts
+
+```
+
+Despues de tener nuestros valores sin nulos, vamos a arreglar el problema de los outliers.
+
+### Ingeniería de características
+Dentro del proceso de análisis, decidimos crear nuevas características
+
+```{r}
+# Ingeniería de características
+train <- train %>%
+  mutate(
+    rooms_per_household = total_rooms / households,
+    bedrooms_per_room = total_bedrooms / total_rooms,
+    population_per_household = population / households
+  )
+
+test <- test %>%
+  mutate(
+    rooms_per_household = total_rooms / households,
+    bedrooms_per_room = total_bedrooms / total_rooms,
+    population_per_household = population / households
+  )
+
+head(train)
+```
+
+Veamos los datos post ingeniería de características.
+
+```{r fig.height=15, fig.width=9}
+# Función para crear un boxplot para una columna específica
+create_boxplot <- function(column_name) {
+  ggplot(train, aes_string(x = "1", y = column_name)) +  # Usamos aes_string para la evaluación no estándar
+    geom_boxplot() +
+    labs(title = paste("Boxplot of", column_name), x = "", y = column_name) +
+    theme_minimal()
+}
+
+# Generar y mostrar todos los boxplots
+plots <- lapply(c(continuas, "rooms_per_household", "bedrooms_per_room", "population_per_household"), create_boxplot)
+
+do.call(grid.arrange, c(plots, ncol = 2))
+```
+
+Ahora vamos a Normalizar los outliers como tal. Centrando los datos alrededor de 0 y que los datos tengan a lo sumo 1 desviación
+
+```{r}
+# Escalar características numéricas
+num_features <- names(train)[sapply(train, is.numeric) & names(train) != "median_house_value" & names(train) != "id"]
+preProcValues <- preProcess(train[, num_features], method = c("center", "scale"))
+train_processed <- train
+train_processed[, num_features] <- predict(preProcValues, train[, num_features])
+test_processed <- test
+test_processed[, num_features] <- predict(preProcValues, test[, num_features])
+```
+
+Veamos cómo quedaron despues de normalizarlos.
+
+```{r fig.height=15, fig.width=9}
+# Función para crear un boxplot para una columna específica
+create_boxplot <- function(column_name) {
+  ggplot(train_processed, aes_string(x = "1", y = column_name)) +  # Usamos aes_string para la evaluación no estándar
+    geom_boxplot() +
+    labs(title = paste("Boxplot of", column_name), x = "", y = column_name) +
+    theme_minimal()
+}
+
+# Generar y mostrar todos los boxplots
+plots <- lapply(c(continuas, "rooms_per_household", "bedrooms_per_room", "population_per_household"), create_boxplot)
+
+do.call(grid.arrange, c(plots, ncol = 2))
+```
+
+Dejamos los outliers para permitir al modelo entrenarse con esos datos. Y que sea capaz de predecirlos.
+
+## Entrenamiento del Modelo
+
+#### Pre procesamiento de los datos
+
+```{r}
+# Seleccionar características
+selected_features <- c(num_features, "ocean_proximity")
+
+# Preparar los datos para LightGBM
+dtrain <- lgb.Dataset(data = as.matrix(train_processed[, selected_features]), label = train_processed$median_house_value)
+```
+
+
+#### Entrenamiento del modelo LightGBM
+
+```{r}
+# Parámetros de LightGBM
+params <- list(
+  objective = "regression",
+  metric = "rmse",
+  boosting_type = "gbdt",
+  learning_rate = 0.01,
+  num_leaves = 31,
+  feature_fraction = 0.9,
+  bagging_fraction = 0.8,
+  bagging_freq = 5,
+  verbose = -1
+)
+
+# Entrenar el modelo
+set.seed(123)
+model_lgb <- lgb.train(params, dtrain, 1000, valids = list(train = dtrain), early_stopping_rounds = 100, verbose = -1)
+```
+
+```{r}
+summary(model_lgb)
+```
+
+#### Resultados
+
+
+Ya que en este caso, no teníamos el test real "test_processed$median_house_value entonces para evaluar nuestro modelo se prosiguió a armar el archivo y subirlo.
+```{r}
+# Predicción en el conjunto de prueba
+test_selected <- as.matrix(test_processed[, selected_features])
+test_predictions <- predict(model_lgb, test_selected)
+```
+
+Aqui se hace la entrega de nuestro mejos modelo. Que nos dió un RMSE de: 25514.60413
+
+```{r}
+# Generar el archivo de salida
+submission <- data.frame(id = test_processed$id, median_house_value = test_predictions)
+write.csv(submission, "submission.csv", row.names = FALSE)
+```
+
+
+Link de Github:
+https://github.com/1Dore/PredictHousePricesKaggle
+
+
+
+
+
+
+
+
+
+
+

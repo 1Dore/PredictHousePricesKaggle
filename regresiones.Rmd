@@ -1,0 +1,440 @@
+---
+title: "Proyecto"
+author: "Dore"
+date: "2024-06-29"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(caret)
+library(lubridate)
+library(PerformanceAnalytics)
+library(gridExtra)
+library(glmnet)
+library(MASS)
+```
+
+
+```{r}
+# Cargar los datasets
+train <- read.csv("train.csv")
+test <- read.csv("data.csv")
+```
+
+
+```{r}
+
+head(train)
+
+```
+```{r}
+
+yname = "median_house_value"
+continuas1 = c(yname, "longitude", "latitude", "housing_median_age", "total_rooms", "total_bedrooms", "population", "households", "median_income")
+
+categoricas = c("ocean_proximityINLAND", "ocean_proximity.1H.OCEAN", "ocean_proximityINLAND", "ocean_proximityISLAND", "ocean_proximityNEAR.BAY", "ocean_proximityNEAR.OCEAN")
+
+```
+
+
+```{r}
+#crar variables dummy
+dummies <- dummyVars(" ~ ocean_proximity", data = train)
+housing_data_transformed <- data.frame(predict(dummies, newdata = train))
+
+# Combinar las variables dummy con el resto del dataset
+train_t <- cbind(train[ , !names(train) %in% c("ocean_proximity")], housing_data_transformed)
+
+train_t$id = NULL
+
+head(train_t)
+```
+
+```{r}
+suppressWarnings(chart.Correlation(train_t[continuas1], histogram=TRUE))
+```
+
+
+```{r}
+# Correlación entre las variables numéricas
+ggcorr(train_t[continuas1], label = TRUE)
+```
+El median income puede ser una variable importante a utilizar. longitude y population no se ven que tenga buena correlación, posiblemente se pueda eliminar esas variables.
+
+
+```{r}
+# Correlación entre las variables numéricas
+ggcorr(train_t[c(yname, categoricas)], label = TRUE)
+```
+Las variables dummy tienen bastante correlacion con la Y, aunque a INLAND y OCEAN tienen correlación de 1.
+
+# Modelos
+
+```{r}
+driver = trainControl( method = "repeatedcv", number=10, repeats=5)
+```
+
+
+```{r}
+na_counts = colSums(is.na(train_t))
+
+na_counts
+```
+```{r}
+# 2 aproaches
+
+#1 median en los valores
+train_t1 = train_t
+train_t1$total_bedrooms[is.na(train_t1$total_bedrooms)] = median(train_t1$total_bedrooms, na.rm = TRUE)
+test_1 = test
+test_1$total_bedrooms[is.na(test_1$total_bedrooms)] = median(test_1$total_bedrooms, na.rm = TRUE)
+
+
+#2 eliminar los datos
+train_t2 = train_t[!is.na(train_t$total_bedrooms), ]
+test_2 = test[!is.na(test$total_bedrooms), ]
+```
+
+
+
+
+```{r}
+lmm = train(median_house_value ~ ., data = train_t1, method = "lm", trControl = driver)
+```
+
+```{r}
+summary(lmm)
+```
+
+```{r}
+lmm2 = train(median_house_value ~ ., data = train_t2, method = "lm", trControl = driver)
+```
+
+```{r}
+summary(lmm2)
+```
+
+```{r}
+print(lmm2)
+```
+
+```{r}
+model_ridge = train(
+  median_house_value ~ ., 
+  data = train_t2, 
+  method = "glmnet", 
+  tuneGrid = expand.grid(alpha = 0, lambda = seq(0.001, 0.90, by = 0.001)),
+  trControl = driver
+)
+
+print(model_ridge)
+```
+
+```{r}
+plot(model_ridge)
+```
+```{r}
+model_ridge$bestTune
+```
+
+
+
+```{r}
+model_ridge$results[200,]
+```
+
+```{r}
+model_lasso = train(
+  median_house_value ~ ., 
+  data = train_t2, 
+  method = "glmnet", 
+  tuneGrid = expand.grid(alpha = 1, lambda = seq(0.001, 0.90, by = 0.001)),
+  trControl = driver
+)
+
+print(model_ridge)
+```
+
+
+```{r}
+model_lasso$bestTune
+```
+
+```{r}
+model_lasso$results[900, ]
+```
+
+```{r}
+elastic = train(
+  median_house_value ~ ., 
+  data = train_t2, 
+  method = "glmnet", 
+  tuneGrid = expand.grid(alpha = seq(0.001, 1, by = 0.005), lambda = seq(0.001, 0.90, by = 0.005)),
+  trControl = driver
+)
+
+print(elastic)
+```
+
+```{r}
+elastic$bestTune
+```
+
+```{r}
+elastic$results[7740, ]
+```
+
+
+```{r}
+train_t3 = train_t2
+
+train_t3$ocean_proximity.1H.OCEAN = NULL
+```
+
+
+```{r}
+# Función para crear un boxplot para una columna específica
+create_boxplot <- function(column_name) {
+  ggplot(train_t3, aes_string(x = "1", y = column_name)) +  # Usamos aes_string para la evaluación no estándar
+    geom_boxplot() +
+    labs(title = paste("Boxplot of", column_name), x = "", y = column_name) +
+    theme_minimal()
+}
+
+# Generar y mostrar todos los boxplots
+plots <- lapply(continuas1, create_boxplot)
+
+# Si quieres ver los plots individualmente en la consola, puedes hacerlo así:
+for (plot in plots) {
+  print(plot)
+}
+```
+
+```{r}
+outliers = c("total_rooms", "total_bedrooms", "population", "households", "median_income")
+
+
+# Normalización Min-Max usando caret
+preProcValues_min_max <- preProcess(train_t3[, outliers], method = c("range"))
+train_t3_normalized <- predict(preProcValues_min_max, train_t3)
+
+# Estandarización usando caret
+preProcValues_standard <- preProcess(train_t3[, outliers], method = c("center", "scale"))
+train_t3_standardized <- predict(preProcValues_standard, train_t3)
+
+# Ver los primeros registros para verificar la normalización y estandarización
+head(train_t3_normalized)
+head(train_t3_standardized)
+```
+
+
+```{r}
+
+# Función para crear un boxplot para una columna específica
+create_boxplot2 <- function(column_name) {
+  ggplot(train_t3_standardized, aes_string(x = "1", y = column_name)) +  # Usamos aes_string para la evaluación no estándar
+    geom_boxplot() +
+    labs(title = paste("Boxplot of", column_name), x = "", y = column_name) +
+    theme_minimal()
+}
+
+# Generar y mostrar todos los boxplots
+plots <- lapply(continuas1, create_boxplot2)
+
+# Si quieres ver los plots individualmente en la consola, puedes hacerlo así:
+for (plot in plots) {
+  print(plot)
+}
+
+```
+
+```{r}
+
+continuas =  names(train)[sapply(train, is.numeric) & names(train) != "median_house_value" & names(train) != "id"  &   30 < sapply(train, n_distinct)  ]
+continuas
+```
+
+```{r}
+for (column_name  in  continuas) {
+  
+  vector_numerico = unlist(train_t3_standardized[column_name])
+  
+  Q1 <- quantile(vector_numerico, 0.25)  # Primer cuartil (Q1)
+  Q3 <- quantile(vector_numerico, 0.75)  # Tercer cuartil (Q3)
+  IQR <- Q3 - Q1  # Rango intercuartílico
+  
+  # Definir los límites inferior y superior para identificar outliers
+  limite_inferior <- Q1 - 1.5 * IQR
+  limite_superior <- Q3 + 1.5 * IQR
+  
+  # Identificar los outliers
+  outliers <- vector_numerico[vector_numerico < limite_inferior | vector_numerico > limite_superior]
+  
+  # Contar los outliers
+  conteo_outliers <- length(outliers)
+  
+  # Resultados
+  print(column_name)
+  print(paste("Número de outliers identificados usando IQR:", conteo_outliers))
+  print(paste("Prosnetaje de outliers identificados usando IQR:", conteo_outliers/nrow(train)))
+}
+
+chart.Correlation(train_t3_standardized[continuas], histogram=TRUE)
+```
+
+```{r}
+remove_outliers <- function(df, columns) {
+  for (col in columns) {
+    Q1 <- quantile(df[[col]], 0.25)
+    Q3 <- quantile(df[[col]], 0.75)
+    IQR <- Q3 - Q1
+    df <- df[!(df[[col]] < (Q1 - 1.5 * IQR) | df[[col]] > (Q3 + 1.5 * IQR)), ]
+  }
+  return(df)
+}
+
+train_processed_no_outliers <- remove_outliers(train_t3_standardized, continuas)
+
+cat("Tamaño del dataset train_processed original: ", nrow(train_t3_standardized), "\n")
+cat("Tamaño del dataset train_processed sin outliers: ", nrow(train_processed_no_outliers), "\n")
+```
+
+
+```{r}
+for (column_name  in  continuas) {
+  
+  vector_numerico = unlist(train_processed_no_outliers[column_name])
+  
+  Q1 <- quantile(vector_numerico, 0.25)  # Primer cuartil (Q1)
+  Q3 <- quantile(vector_numerico, 0.75)  # Tercer cuartil (Q3)
+  IQR <- Q3 - Q1  # Rango intercuartílico
+  
+  # Definir los límites inferior y superior para identificar outliers
+  limite_inferior <- Q1 - 1.5 * IQR
+  limite_superior <- Q3 + 1.5 * IQR
+  
+  # Identificar los outliers
+  outliers <- vector_numerico[vector_numerico < limite_inferior | vector_numerico > limite_superior]
+  
+  # Contar los outliers
+  conteo_outliers <- length(outliers)
+  
+  # Resultados
+  print(column_name)
+  print(paste("Número de outliers identificados usando IQR:", conteo_outliers))
+  print(paste("Prosnetaje de outliers identificados usando IQR:", conteo_outliers/nrow(train)))
+}
+
+chart.Correlation(train_processed_no_outliers[c(continuas, yname)], histogram=TRUE)
+```
+
+```{r}
+head(train_processed_no_outliers)
+```
+
+
+```{r}
+#crar variables dummy
+dummies <- dummyVars(" ~ ocean_proximity", data = test)
+housing_data_transformed <- data.frame(predict(dummies, newdata = test))
+
+# Combinar las variables dummy con el resto del dataset
+test <- cbind(test[ , !names(test) %in% c("ocean_proximity")], housing_data_transformed)
+
+head(test)
+```
+
+
+```{r}
+# Normalización Min-Max usando caret
+preProcValues_min_max <- preProcess(test[, outliers], method = c("range"))
+test_t3_normalized <- predict(preProcValues_min_max, test)
+
+# Estandarización usando caret
+preProcValues_standard <- preProcess(test[, outliers], method = c("center", "scale"))
+test_t3_standardized <- predict(preProcValues_standard, test)
+
+# Ver los primeros registros para verificar la normalización y estandarización
+head(test_t3_normalized)
+head(test_t3_standardized)
+```
+
+```{r}
+
+# Función para crear un boxplot para una columna específica
+create_boxplot2 <- function(column_name) {
+  ggplot(train_processed_no_outliers, aes_string(x = "1", y = column_name)) +  # Usamos aes_string para la evaluación no estándar
+    geom_boxplot() +
+    labs(title = paste("Boxplot of", column_name), x = "", y = column_name) +
+    theme_minimal()
+}
+
+# Generar y mostrar todos los boxplots
+plots <- lapply(continuas1, create_boxplot2)
+
+# Si quieres ver los plots individualmente en la consola, puedes hacerlo así:
+for (plot in plots) {
+  print(plot)
+}
+```
+
+
+
+```{r}
+driver = trainControl( method = "repeatedcv", number=10, repeats=5, search="grid")
+```
+
+```{r}
+# Definir el grid de hiperparámetros para XGBoost
+xgb_grid <- expand.grid(
+  nrounds = c(100, 200),
+  max_depth = c(6, 10),
+  eta = c(0.01, 0.1, 0.3),
+  gamma = c(0, 0.1, 0.2),
+  colsample_bytree = c(0.8, 1),
+  min_child_weight = c(1, 3),
+  subsample = c(0.8, 1)
+)
+
+# Entrenar el modelo XGBoost con early stopping
+xgb_model <- train(
+  median_house_value ~ ., 
+  data = train_processed_no_outliers, 
+  method = "xgbTree", 
+  trControl = driver, 
+  tuneGrid = xgb_grid,
+  verbose = FALSE, nthread = 1
+)
+ 
+print(xgb_model)
+```
+
+
+```{r}
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
