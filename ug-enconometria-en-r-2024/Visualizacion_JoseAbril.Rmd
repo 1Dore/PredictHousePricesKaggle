@@ -29,7 +29,7 @@ test$total_bedrooms[is.na(test$total_bedrooms)] <- median(test$total_bedrooms, n
 
 # No Funciono / No dio resultado satisfactorios
 
-## Visualizacion de las variables Espaciales
+## Clusters
 #### Cada intento con clusterizacion no redujo el RMSE y por eso de descarto su uso
 
 ### Latitud, Longitud y Ocean Proximity
@@ -65,7 +65,6 @@ m <- leaflet(train) %>%
 m
 ```
 
-## Clusterizacion
 ```{r}
 train$ocean_proximity_num <- as.numeric(as.factor(train$ocean_proximity))
 ```
@@ -153,7 +152,7 @@ suppressWarnings(chart.Correlation(train[continuas], histogram=TRUE))
 
 ```
 
-## Eliminacion 
+### Eliminacion 
 ```{r}
 remove_outliers <- function(df, columns) {
   for (col in columns) {
@@ -199,6 +198,8 @@ for (column_name  in  continuas) {
 
 suppressWarnings(chart.Correlation(train_no_outliers[continuas], histogram=TRUE))
 ```
+## Metodos Descartados
+- Seleccion de Variables
 
 ## Modelos Descartados
 - Lineal
