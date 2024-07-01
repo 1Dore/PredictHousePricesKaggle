@@ -125,9 +125,9 @@ calcular_silueta_promedio <- function(data, k) {
 # Calcular la silueta promedio para k = 2 a 10
 k_values <- 2:15
 
-fviz_nbclust(train[, c("longitude", "latitude", "ocean_proximity_num")], kmeans, method = "wss")
+fviz_nbclust(train[, c("longitude", "latitude", "median_house_value")], kmeans, method = "wss")
 
-silueta_promedio <- sapply(k_values, function(k) calcular_silueta_promedio(train[, c("longitude", "latitude", "ocean_proximity_num")], k))
+silueta_promedio <- sapply(k_values, function(k) calcular_silueta_promedio(train[, c("longitude", "latitude", "median_house_value")], k))
 
 
 # Visualizar los resultados
@@ -153,7 +153,7 @@ num_clusters <- 5
 
 # Aplica el clustering K-Means
 set.seed(42) # Para reproducibilidad
-clusters <- kmeans(train[, c("longitude", "latitude", "ocean_proximity_num")], centers = num_clusters)
+clusters <- kmeans(train[, c("longitude", "latitude", "median_house_value")], centers = num_clusters)
 
 # Añade los clusters al dataframe
 train$position_cluster <- as.factor(clusters$cluster)

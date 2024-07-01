@@ -1,0 +1,114 @@
+---
+title: "Graficas Cluster"
+author: "José Abril"
+date: "2024-07-01"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(caret)
+library(randomForest)
+library(xgboost)
+library(GGally)
+library(leaflet)
+library(cluster)
+library(factoextra)
+library(glmnet)
+
+library(PerformanceAnalytics)
+```
+
+```{r}
+# Cargar los datasets
+train <- read.csv("train.csv")
+test <- read.csv("test.csv")
+```
+
+# Visualizacion de las variables Espaciales
+## Latitud, Longitud y Ocean Proximity
+```{r}
+ggplot(train, aes(x = longitude, y = latitude, color = ocean_proximity)) +
+  geom_point()  +
+  labs(title = "Mapa de precios de casas por coordenadas",
+       x = "Longitud",
+       y = "Latitud",
+       color = "Cercania")
+```
+
+## Longitud, Latitud y Median House Value
+```{r}
+ggplot(train, aes(x = longitude, y = latitude, color = median_house_value)) +
+  geom_point() +
+  scale_color_gradient(low = "blue", high = "red") +
+  labs(title = "Mapa de precios de casas por coordenadas",
+       x = "Longitud",
+       y = "Latitud",
+       color = "Precio de la Casa")
+```
+
+## Longitud, Latitud y Median House Value, con mapa
+```{r}
+
+m <- leaflet(train) %>%
+  addTiles() %>%
+  addCircleMarkers(~longitude, ~latitude, radius = ~median_house_value/100000, 
+                   color = ~ifelse(median_house_value > median(train$median_house_value), 'red', 'blue'), 
+                   popup = ~paste("median_house_value:", median_house_value))
+
+m
+```
+
+# Clusterizacion
+```{r}
+train$ocean_proximity_num <- as.numeric(as.factor(train$ocean_proximity))
+```
+
+## Visualizacion Para el Metodo del Codo
+```{r}
+# Calcular la silueta promedio para k = 2 a 10
+k_values <- 2:15
+
+fviz_nbclust(train[, c("longitude", "latitude", "ocean_proximity_num")], kmeans, method = "wss")
+```
+
+## Visualizacion Para el Metodo de la Siloeta
+```{r}
+calcular_silueta_promedio <- function(data, k) {
+  set.seed(42)
+  kmeans_result <- kmeans(data, centers = k)
+  silueta <- silhouette(kmeans_result$cluster, dist(data))
+  mean(silueta[, 3])  # Promedio del coeficiente de silueta
+}
+
+silueta_promedio <- sapply(k_values, function(k) calcular_silueta_promedio(train[, c("longitude", "latitude", "ocean_proximity_num")], k))
+
+
+# Visualizar los resultados
+plot(k_values, silueta_promedio, type = "b", pch = 19,
+     xlab = "Número de Clusters (k)", ylab = "Coeficiente de Silueta Promedio",
+     main = "Coeficiente de Silueta Promedio para Diferentes k")
+
+```
+
+## Visualizacion de los clusters y su posicion
+```{r}
+num_clusters <- 5
+
+
+clusters <- kmeans(train[, c("longitude", "latitude", "ocean_proximity_num")], centers = num_clusters)
+train$position_cluster <- as.factor(clusters$cluster)
+
+ggplot(train, aes(x = longitude, y = latitude, color = position_cluster)) +
+  geom_point() +
+  labs(title = "Clustering de casas por coordenadas",
+       x = "Longitud",
+       y = "Latitud",
+       color = "Cluster")
+```
+
+
