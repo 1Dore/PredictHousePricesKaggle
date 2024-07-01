@@ -30,7 +30,7 @@ test$total_bedrooms[is.na(test$total_bedrooms)] <- median(test$total_bedrooms, n
 # No Funciono / No dio resultado satisfactorios
 
 ## Visualizacion de las variables Espaciales
-#### Cada intento con Clusterizcion redujo el RMSE y por eso de descarto su uso
+#### Cada intento con clusterizacion no redujo el RMSE y por eso de descarto su uso
 
 ### Latitud, Longitud y Ocean Proximity
 ```{r}
