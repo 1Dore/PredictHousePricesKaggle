@@ -1,0 +1,185 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(tidyverse)
+library(caret)
+library(randomForest)
+library(xgboost)
+library(GGally)
+library(dplyr)
+```
+
+```{r}
+# Cargar los datasets
+train <- read.csv("train.csv")
+test <- read.csv("test.csv")
+```
+
+```{r}
+# Ver las primeras filas del conjunto de entrenamiento
+head(train)
+
+# Resumen de los datos
+summary(train)
+
+# Distribución de la variable objetivo
+ggplot(train, aes(x = median_house_value)) +
+  geom_histogram(binwidth = 50000, fill = "blue", color = "black") +
+  theme_minimal() +
+  labs(title = "Distribución de median_house_value")
+
+# Correlación entre las variables numéricas
+num_vars <- train %>% select(-id, -ocean_proximity)
+ggcorr(num_vars, label = TRUE)
+
+# Relación entre median_income y median_house_value
+ggplot(train, aes(x = median_income, y = median_house_value)) +
+  geom_point(alpha = 0.3) +
+  theme_minimal() +
+  labs(title = "Relación entre median_income y median_house_value")
+```
+
+```{r}
+# Imputar valores nulos en total_bedrooms
+train$total_bedrooms[is.na(train$total_bedrooms)] <- median(train$total_bedrooms, na.rm = TRUE)
+test$total_bedrooms[is.na(test$total_bedrooms)] <- median(test$total_bedrooms, na.rm = TRUE)
+
+train <- train %>%
+  mutate(
+    rooms_per_household = total_rooms / households,
+    bedrooms_per_room = total_bedrooms / total_rooms,
+    population_per_household = population / households
+  )
+
+test <- test %>%
+  mutate(
+    rooms_per_household = total_rooms / households,
+    bedrooms_per_room = total_bedrooms / total_rooms,
+    population_per_household = population / households
+  )
+```
+
+```{r}
+# Función para identificar y eliminar outliers
+remove_outliers <- function(df, columns) {
+  for (col in columns) {
+    Q1 <- quantile(df[[col]], 0.25, na.rm = TRUE)
+    Q3 <- quantile(df[[col]], 0.75, na.rm = TRUE)
+    IQR <- Q3 - Q1
+    df <- df[!(df[[col]] < (Q1 - 1.5 * IQR) | df[[col]] > (Q3 + 1.5 * IQR)), ]
+  }
+  return(df)
+}
+
+# Identificar y eliminar outliers en train
+numeric_columns_train <- sapply(train, is.numeric)
+train_no_outliers <- remove_outliers(train,names(numeric_columns_train[numeric_columns_train]))
+```
+
+```{r}
+# Codificar variables categóricas
+train_no_outliers$ocean_proximity <- as.factor(train_no_outliers$ocean_proximity)
+test$ocean_proximity <- as.factor(test$ocean_proximity)
+
+# Escalar características numéricas
+num_features <- names(train_no_outliers)[sapply(train_no_outliers, is.numeric) & names(train_no_outliers) != "median_house_value" & names(train_no_outliers) != "id"]
+preProcValues <- preProcess(train_no_outliers[, num_features], method = c("center", "scale"))
+train_processed <- train_no_outliers
+train_processed[, num_features] <- predict(preProcValues, train_no_outliers[, num_features])
+test_processed <- test
+test_processed[, num_features] <- predict(preProcValues, test[, num_features])
+```
+
+```{r}
+# Utilizar Recursive Feature Elimination (RFE) para seleccionar las 5 mejores variables en el dataset sin outliers
+set.seed(123)
+control <- rfeControl(functions = rfFuncs, method = "cv", number = 5)
+rfe_results <- rfe(train_processed[, num_features], train_processed$median_house_value, sizes = c(1:10), rfeControl = control)
+
+# Resumen de las variables seleccionadas
+print(rfe_results)
+
+# Variables seleccionadas
+selected_features <- predictors(rfe_results)
+selected_features <- setdiff(selected_features, c("population", "total_bedrooms", "total_rooms"))
+print(selected_features)
+
+# Seleccionar solo las características seleccionadas para el entrenamiento
+train_selected <- train_processed[, c(selected_features, "median_house_value")]
+```
+
+```{r}
+set.seed(123)
+train_control <- trainControl(method = "cv", number = 5)
+
+# Modelo Random Forest
+rf_model <- train(median_house_value ~ ., data = train_selected, method = "rf", trControl = train_control)
+print(rf_model)
+
+# Modelo XGBoost
+xgb_grid <- expand.grid(
+  nrounds = 100,
+  max_depth = 6,
+  eta = 0.3,
+  gamma = 0,
+  colsample_bytree = 1,
+  min_child_weight = 1,
+  subsample = 1
+)
+xgb_model <- train(median_house_value ~ ., data = train_selected, method = "xgbTree", trControl = train_control, tuneGrid = xgb_grid)
+print(xgb_model)
+
+# Ridge Regression
+ridge_model <- train(median_house_value ~ ., data = train_selected, method = "ridge", trControl = train_control, tuneLength = 10)
+print(ridge_model)
+
+# Lasso Regression
+lasso_model <- train(median_house_value ~ ., data = train_selected, method = "lasso", trControl = train_control, tuneLength = 10)
+print(lasso_model)
+
+# Comparar RMSE de los modelos
+results <- resamples(list(rf = rf_model, xgb = xgb_model, ridge = ridge_model, lasso = lasso_model))
+summary(results)
+```
+
+```{r}
+# Seleccionar el mejor modelo basado en el RMSE
+best_model <- if(min(rf_model$results$RMSE) < min(xgb_model$results$RMSE) & 
+                  min(rf_model$results$RMSE) < min(ridge_model$results$RMSE) & 
+                  min(rf_model$results$RMSE) < min(lasso_model$results$RMSE)) {
+  rf_model
+} else if (min(xgb_model$results$RMSE) < min(ridge_model$results$RMSE) & 
+           min(xgb_model$results$RMSE) < min(lasso_model$results$RMSE)) {
+  xgb_model
+} else if (min(ridge_model$results$RMSE) < min(lasso_model$results$RMSE)) {
+  ridge_model
+} else {
+  lasso_model
+}
+
+# Asegurarse de que las variables seleccionadas estén presentes en el conjunto de prueba
+test_selected <- test_processed[, selected_features]
+
+# Asegurarse de que test_selected no contenga factores que no estén en el train
+for (col in selected_features) {
+  if (is.factor(test_selected[[col]])) {
+    test_selected[[col]] <- factor(test_selected[[col]], levels = levels(train_selected[[col]]))
+  }
+}
+
+# Predicción en el conjunto de prueba
+test_predictions <- predict(best_model, newdata = test_selected)
+
+# Generar el archivo de salida asegurando el mismo número de filas
+submission <- data.frame(id = test_processed$id[1:nrow(test_selected)], median_house_value = test_predictions)
+write.csv(submission, "submission.csv", row.names = FALSE)
+```
+
+
+
+
+
+
